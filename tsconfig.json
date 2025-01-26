@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "strict": false, // Отключаем строгий режим
+    "noImplicitAny": false, // Разрешаем неявный any
+    "strictNullChecks": false, // Отключаем строгие проверки null
+    "strictPropertyInitialization": false, // Отключаем обязательную инициализацию свойств
+    "module": "commonjs",
+    "target": "es2017",
+    "moduleResolution": "node",
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "baseUrl": "./",
+    "incremental": true,
+    "skipLibCheck": true,
+    "outDir": "./dist",
+    "types": ["node", "express", "multer"]
+  }
+}

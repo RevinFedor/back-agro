@@ -1,0 +1,98 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  firstName String
+  lastName  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Отношения
+  ownedProjects  Project[]       @relation("ProjectOwner")
+  projectMembers ProjectMember[]
+  taskMembers    TaskMember[]
+}
+
+model Project {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  owner   User            @relation("ProjectOwner", fields: [ownerId], references: [id])
+  ownerId String // Переименовываем userId в ownerId
+  members ProjectMember[]
+  tasks   Task[]
+}
+
+model ProjectMember {
+  id        String   @id @default(uuid())
+  role      Role     @default(VIEWER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Отношения
+  user      User    @relation(fields: [userId], references: [id])
+  userId    String
+  project   Project @relation(fields: [projectId], references: [id])
+  projectId String
+
+  @@unique([userId, projectId])
+}
+
+model Task {
+  id        String     @id @default(uuid())
+  name      String
+  status    TaskStatus @default(PROCESSING)
+  type      TaskType
+  tiffPath  String?
+  odmTaskId String? // Добавляем это поле
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  project   Project      @relation(fields: [projectId], references: [id])
+  projectId String
+  members   TaskMember[]
+}
+
+model TaskMember {
+  id        String   @id @default(uuid())
+  role      Role? // null означает что задача не видна пользователю
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Отношения
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+  task   Task   @relation(fields: [taskId], references: [id])
+  taskId String
+
+  @@unique([userId, taskId])
+}
+
+enum Role {
+  OWNER // Владелец/админ проекта
+  EDITOR // Может редактировать
+  VIEWER // Может только просматривать
+}
+
+enum TaskStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum TaskType {
+  DRONE_IMAGES
+  SATELLITE_IMAGES
+}
