@@ -8,9 +8,6 @@
 
 #### **NestJS Application (Port: 3001)**
 - **REST API** для основных операций  
-  _Пути:_  
-  - Основной контроллер и сервис: [src/app.controller.ts](src/app.controller.ts), [src/app.service.ts](src/app.service.ts)  
-  - Точка входа и настройка приложения: [src/main.ts](src/main.ts)
 
 - **WebSocket Server** для real-time обновлений  
   _Путь:_  
@@ -21,11 +18,6 @@
   - JWT стратегия и настройка: [src/auth/jwt.strategy.ts](src/auth/jwt.strategy.ts)  
   - Контроллер и сервис аутентификации: [src/auth/auth.controller.ts](src/auth/auth.controller.ts), [src/auth/auth.service.ts](src/auth/auth.service.ts)  
   - Модуль аутентификации: [src/auth/auth.module.ts](src/auth/auth.module.ts)
-
-- **Swagger документация**  
-  _Путь:_  
-  - Конфигурация Swagger и генерация спецификации: [src/main.ts](src/main.ts)  
-  - Сгенерированная спецификация: [swagger-spec.json](swagger-spec.json)
 
 - **Эндпоинты для обработки TIFF файлов:**  
   - **Загрузка TIFF файла** – сохраняется и инициируется обработка, генерируются спектральные изображения (RGB, NDVI, INFRARED, VARI)  
