@@ -7,34 +7,55 @@
 ### 1. Компоненты Backend
 
 #### **NestJS Application (Port: 3001)**
-- **REST API** для основных операций
-- **WebSocket Server** для real-time обновлений
-- **JWT аутентификация**
-- **Swagger документация**
+- **REST API** для основных операций  
+  _Пути:_  
+  - Основной контроллер и сервис: [src/app.controller.ts](src/app.controller.ts), [src/app.service.ts](src/app.service.ts)  
+  - Точка входа и настройка приложения: [src/main.ts](src/main.ts)
+
+- **WebSocket Server** для real-time обновлений  
+  _Путь:_  
+  - Реализация WebSocket уведомлений: [src/task/task.gateway.ts](src/task/task.gateway.ts)
+
+- **JWT аутентификация**  
+  _Пути:_  
+  - JWT стратегия и настройка: [src/auth/jwt.strategy.ts](src/auth/jwt.strategy.ts)  
+  - Контроллер и сервис аутентификации: [src/auth/auth.controller.ts](src/auth/auth.controller.ts), [src/auth/auth.service.ts](src/auth/auth.service.ts)  
+  - Модуль аутентификации: [src/auth/auth.module.ts](src/auth/auth.module.ts)
+
+- **Swagger документация**  
+  _Путь:_  
+  - Конфигурация Swagger и генерация спецификации: [src/main.ts](src/main.ts)  
+  - Сгенерированная спецификация: [swagger-spec.json](swagger-spec.json)
+
+- **Эндпоинты для обработки TIFF файлов:**  
+  - **Загрузка TIFF файла** – сохраняется и инициируется обработка, генерируются спектральные изображения (RGB, NDVI, INFRARED, VARI)  
+    _Путь:_  
+    - Эндпоинт загрузки: [src/task/task.controller.ts](src/task/task.controller.ts) (маршрут: `/projects/:projectId/tasks/:taskId/tiff-upload`)  
+    - Логика обработки TIFF: [src/task/task.service.ts](src/task/task.service.ts) и [src/task/services/node-odm.service.ts](src/task/services/node-odm.service.ts)  
+    - Генерация спектральных изображений: [src/task/services/spectral.service.ts](src/task/services/spectral.service.ts)
+
+- **Debug Endpoint** для тестирования спектральной обработки  
+  _Путь:_  
+  - Контроллер для отладки: [src/debug/debug.controller.ts](src/debug/debug.controller.ts)  
+  - Маршрут: **POST** `/debug/spectral`
+
+- **Расширенные WebSocket уведомления:**  
+  _Путь:_  
+  - Отправка обновлений прогресса и уведомлений о завершении: [src/task/task.gateway.ts](src/task/task.gateway.ts)  
+  - Примеры:  
+    - Обновление прогресса: событие `task:{taskId}:progress`  
+    - Завершение обработки с метаданными: событие `task:{taskId}:complete`
 
 #### **NodeODM Service (Port: 3000)**
-- Внешний сервис для обработки изображений
-- **REST API** для управления задачами
-- **Асинхронная обработка**
-- **Генерация TIFF результатов**
-
-### Новые возможности
-
-За последнее обновление были добавлены следующие функциональности:
-
-- **Обработка TIFF файлов и генерация спектральных изображений:**
-  - Добавлен новый эндпоинт для загрузки TIFF файла:  
-    **POST** `/projects/:projectId/tasks/:taskId/tiff-upload`
-  - После загрузки файла система сохраняет TIFF, выполняет обработку и генерирует спектральные изображения (RGB, NDVI, INFRARED, VARI).
-  - Результаты обработки (PNG файлы) сохраняются в папке задачи и доступны для скачивания.
-
-- **Отладка спектральной обработки:**
-  - Добавлен **Debug Endpoint** для тестирования спектральной обработки:  
-    **POST** `/debug/spectral`
-  - Позволяет загрузить TIFF файл и сразу проверить генерацию спектральных изображений.
-
-- **Расширенные WebSocket уведомления:**
-  - Помимо обновления прогресса (`task:{taskId}:progress`), теперь WebSocket сервер уведомляет клиентов о завершении обработки задачи (`task:{taskId}:complete`) с дополнительными метаданными (bounding box, список сгенерированных изображений).
+- **Внешний сервис для обработки изображений**  
+  _Интеграция в проекте:_  
+  - Взаимодействие с NodeODM реализовано через: [src/task/services/node-odm.service.ts](src/task/services/node-odm.service.ts)
+- **REST API** для управления задачами  
+  - NodeODM предоставляет собственный API для управления задачами (интегрируется через вызовы HTTP в [src/task/services/node-odm.service.ts](src/task/services/node-odm.service.ts))
+- **Асинхронная обработка**  
+  - Обработка задач NodeODM происходит асинхронно (описывается в логике сервиса в [src/task/services/node-odm.service.ts](src/task/services/node-odm.service.ts))
+- **Генерация TIFF результатов**  
+  - Скачивание и сохранение TIFF-файлов осуществляется в [src/task/services/node-odm.service.ts](src/task/services/node-odm.service.ts)
 
 
 ### 2. Интеграция с Swagger
