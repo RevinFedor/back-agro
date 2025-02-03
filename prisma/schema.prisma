@@ -30,7 +30,7 @@ model Project {
   updatedAt   DateTime @updatedAt
 
   owner   User            @relation("ProjectOwner", fields: [ownerId], references: [id])
-  ownerId String // Переименовываем userId в ownerId
+  ownerId String
   members ProjectMember[]
   tasks   Task[]
 }
@@ -41,7 +41,6 @@ model ProjectMember {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Отношения
   user      User    @relation(fields: [userId], references: [id])
   userId    String
   project   Project @relation(fields: [projectId], references: [id])
@@ -56,9 +55,12 @@ model Task {
   status    TaskStatus @default(PROCESSING)
   type      TaskType
   tiffPath  String?
-  odmTaskId String? // Добавляем это поле
+  odmTaskId String?
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
+
+  spectralImages String[] // массив путей к PNG
+  boundingBox    Json? // границы
 
   project   Project      @relation(fields: [projectId], references: [id])
   projectId String
@@ -87,6 +89,7 @@ enum Role {
 }
 
 enum TaskStatus {
+  PENDING
   PROCESSING
   COMPLETED
   FAILED
@@ -95,4 +98,11 @@ enum TaskStatus {
 enum TaskType {
   DRONE_IMAGES
   SATELLITE_IMAGES
+}
+
+enum SpectralType {
+  RGB
+  NDVI
+  INFRARED
+  VARI
 }

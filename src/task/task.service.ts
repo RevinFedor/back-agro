@@ -11,6 +11,15 @@ import { Role, Task, TaskMember, TaskStatus } from '@prisma/client';
 import { NodeOdmService } from './services/node-odm.service';
 import { UpdateTaskDto } from './dto/update-task.dto';
 
+import * as path from 'path';
+import { rm, unlink } from 'fs/promises';
+
+import { SpectralService } from './services/spectral.service';
+import { mkdirp } from 'mkdirp';
+import * as GeoTIFF from 'geotiff';
+import * as proj4 from 'proj4';
+import { writeFile } from 'fs/promises';
+
 type TaskWithMembers = Task & {
   members: TaskMember[];
 };
@@ -21,10 +30,11 @@ type TaskWithMembers = Task & {
 @Injectable()
 export class TaskService {
   constructor(
-    private prisma: PrismaService, // Работа с базой данных.  
-    private nodeOdmService: NodeOdmService, // Взаимодействие с NodeODM.  
-    private taskGateway: TaskGateway, // WebSocket уведомления.  
+    private prisma: PrismaService, // Работа с базой данных.
+    private nodeOdmService: NodeOdmService, // Взаимодействие с NodeODM.
+    private taskGateway: TaskGateway, // WebSocket уведомления.
   ) {}
+  private readonly logger = new Logger(TaskService.name);
 
   // Обновление статуса задачи на основе данных из NodeODM.
   private async updateTaskStatus(
@@ -36,7 +46,6 @@ export class TaskService {
         return task;
       }
 
-      
       // Получаем информацию от NodeODM
       const odmTaskInfo = await this.nodeOdmService.getTaskInfo(task.odmTaskId);
 
@@ -77,7 +86,7 @@ export class TaskService {
     }
   }
 
-   // Запуск процесса отслеживания прогресса задачи.
+  // Запуск процесса отслеживания прогресса задачи.
   private async pollTaskProgress(taskId: string, odmTaskId: string) {
     const interval = setInterval(async () => {
       try {
@@ -113,8 +122,6 @@ export class TaskService {
     projectId: string,
     userId: string,
   ) {
-   
-
     const member = await this.prisma.projectMember.findUnique({
       where: {
         userId_projectId: {
@@ -133,7 +140,7 @@ export class TaskService {
     const task = await this.prisma.task.create({
       data: {
         ...createTaskDto,
-        status: TaskStatus.PROCESSING,
+        status: TaskStatus.PENDING,
         projectId,
         members: {
           create: {
@@ -146,7 +153,6 @@ export class TaskService {
 
     return task;
   }
-
   // Получение всех задач проекта с учетом доступа пользователя.
   async findAll(projectId: string, userId: string) {
     // Проверяем доступ к проекту
@@ -209,6 +215,11 @@ export class TaskService {
     const task = await this.findOne(taskId, userId);
 
     try {
+      await this.prisma.task.update({
+        where: { id: taskId },
+        data: { status: TaskStatus.PROCESSING },
+      });
+
       const odmTask = await this.nodeOdmService.initTask();
       await this.nodeOdmService.uploadImages(odmTask.uuid, images);
       await this.nodeOdmService.processTask(odmTask.uuid);
@@ -218,7 +229,6 @@ export class TaskService {
         data: { odmTaskId: odmTask.uuid },
       });
 
-      // Запускаем отслеживание прогресса
       this.pollTaskProgress(taskId, odmTask.uuid);
 
       return {
@@ -227,35 +237,134 @@ export class TaskService {
         odmTaskId: odmTask.uuid,
       };
     } catch (error) {
+      await this.prisma.task.update({
+        where: { id: taskId },
+        data: { status: TaskStatus.FAILED },
+      });
       throw error;
     }
   }
 
-  // Завершение обработки задачи и обновление статуса.
+  // логика обработки tiff
+  private async processSpectralAndBoundingBox(taskId: string, tiffPath: string) {
+  this.logger.debug('Starting spectral and bounding box processing');
+  
+  try {
+    // Генерируем спектральные изображения
+    const spectralDir = path.join('uploads', 'tasks', taskId, 'spectral');
+    await mkdirp(spectralDir);
+    
+    const spectralService = new SpectralService();
+    const spectralResults = await spectralService.generateSpectralImages(
+      tiffPath,
+      spectralDir,
+    );
+    
+    // Извлекаем и конвертируем bounding box
+    const tiff = await GeoTIFF.fromFile(tiffPath);
+    const image = await tiff.getImage();
+    const [minX, minY, maxX, maxY] = image.getBoundingBox();
+
+    const sourceProj = '+proj=utm +zone=17 +datum=WGS84 +units=m +no_defs';
+    const targetProj = '+proj=longlat +datum=WGS84 +no_defs';
+    const [swLon, swLat] = proj4(sourceProj, targetProj, [minX, minY]);
+    const [neLon, neLat] = proj4(sourceProj, targetProj, [maxX, maxY]);
+
+    const boundingBox = [
+      [swLat, swLon],
+      [neLat, neLon],
+    ];
+
+    // Обновляем задачу с результатами
+    await this.prisma.task.update({
+      where: { id: taskId },
+      data: {
+        status: TaskStatus.COMPLETED,
+        spectralImages: spectralResults.map(r => r.imagePath),
+        boundingBox: boundingBox,
+      },
+    });
+
+    // Отправляем уведомление о завершении
+    this.taskGateway.sendTaskComplete(taskId, {
+      status: 'COMPLETED',
+      boundingBox: boundingBox,
+    });
+
+  } catch (error) {
+    this.logger.error(
+      `Error in spectral processing for task ${taskId}: ${error.message}`,
+      error.stack,
+    );
+    
+    await this.prisma.task.update({
+      where: { id: taskId },
+      data: { status: TaskStatus.FAILED },
+    });
+    
+    this.taskGateway.sendTaskStatus(taskId, TaskStatus.FAILED);
+    throw error;
+  }
+}
+
+ //  обработка уже готового tiff
+ async processTiff(taskId: string, tiffFile: Express.Multer.File, userId: string) {
+  const task = await this.findOne(taskId, userId);
+
+  try {
+    // Обновляем статус
+    await this.prisma.task.update({
+      where: { id: taskId },
+      data: { status: TaskStatus.PROCESSING },
+    });
+
+    // Сохраняем загруженный TIFF
+    const taskDir = path.join('uploads', 'tasks', taskId);
+    await mkdirp(taskDir);
+    const tiffPath = path.join(taskDir, 'odm_orthophoto.tif');
+    await writeFile(tiffPath, tiffFile.buffer);
+
+    // Обновляем путь к TIFF
+    await this.prisma.task.update({
+      where: { id: taskId },
+      data: { tiffPath },
+    });
+
+    // Вызываем общую логику обработки
+    await this.processSpectralAndBoundingBox(taskId, tiffPath);
+
+    return {
+      success: true,
+      message: 'TIFF processing completed',
+      taskId: taskId,
+    };
+  } catch (error) {
+    this.logger.error(`Error in processTiff: ${error.message}`);
+    throw error;
+  }
+}
+
+  // Завершение обработки задачи и обновление БД.
   async handleTaskCompletion(taskId: string, odmTaskId: string) {
-    try {
-      const tiffPath = await this.nodeOdmService.downloadAndSaveTiff(
-        odmTaskId,
-        taskId,
-      );
+  this.logger.log(`Starting task completion for ODM task ${odmTaskId}`);
+  
+  try {
+    // Скачиваем TIFF от ODM
+    const tiffPath = await this.nodeOdmService.downloadAndSaveTiff(odmTaskId, taskId);
+    
+    // Обновляем путь к TIFF
+    await this.prisma.task.update({
+      where: { id: taskId },
+      data: { tiffPath },
+    });
 
-      await this.prisma.task.update({
-        where: { id: taskId },
-        data: {
-          status: TaskStatus.COMPLETED,
-          tiffPath: tiffPath,
-        },
-      });
-    } catch (error) {
-      await this.prisma.task.update({
-        where: { id: taskId },
-        data: {
-          status: TaskStatus.FAILED,
-        },
-      });
-      throw error;
-    }
+    // Вызываем общую логику обработки
+    await this.processSpectralAndBoundingBox(taskId, tiffPath);
+  } catch (error) {
+    this.logger.error(`Error in handleTaskCompletion: ${error.message}`);
+    throw error;
   }
+}
 
   // Обновление данных задачи с проверкой доступа.
   async update(taskId: string, updateTaskDto: UpdateTaskDto, userId: string) {
@@ -287,6 +396,19 @@ export class TaskService {
       throw new ForbiddenException('No permission to delete this task');
     }
 
+    if (task.tiffPath) {
+      const taskDir = path.join('uploads', 'tasks', taskId);
+      try {
+        // Удаляем TIFF файл
+        await unlink(task.tiffPath);
+        // Удаляем директорию задачи
+        await rm(taskDir, { recursive: true, force: true });
+      } catch (error) {
+        Logger.error(`Не удалось удалить файлы задачи: ${error.message}`);
+      }
+    }
+
+    // Удаление записей из базы данных
     await this.prisma.$transaction([
       this.prisma.taskMember.deleteMany({ where: { taskId } }),
       this.prisma.task.delete({ where: { id: taskId } }),

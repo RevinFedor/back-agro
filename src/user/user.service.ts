@@ -1,12 +1,17 @@
-import { Injectable } from '@nestjs/common';
+import { forwardRef, Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import * as bcrypt from 'bcrypt';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { AuthService } from 'src/auth/auth.service';
 
 @Injectable()
 export class UserService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    @Inject(forwardRef(() => AuthService))
+    private authService: AuthService,
+  ) {}
 
   async findOne(email: string) {
     return this.prisma.user.findUnique({
@@ -16,12 +21,22 @@ export class UserService {
 
   async create(data: CreateUserDto) {
     const hashedPassword = await bcrypt.hash(data.password, 10);
-    return this.prisma.user.create({
+
+    const user = await this.prisma.user.create({
       data: {
         ...data,
         password: hashedPassword,
       },
     });
+
+    // Получаем JWT токен
+    const { access_token } = await this.authService.login(user);
+
+    const { password, ...result } = user;
+    return {
+      user: result,
+      access_token,
+    };
   }
 
   async update(id: string, updateUserDto: UpdateUserDto) {

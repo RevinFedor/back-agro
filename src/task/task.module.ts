@@ -6,10 +6,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import { HttpModule } from '@nestjs/axios';
 import { ConfigModule } from '@nestjs/config';
 import { TaskGateway } from './task.gateway';
+import { SpectralService } from './services/spectral.service';
 
 @Module({
   imports: [HttpModule, ConfigModule], 
   controllers: [TaskController],
-  providers: [TaskService, NodeOdmService, PrismaService,TaskGateway ],
+  providers: [TaskService, NodeOdmService, PrismaService,TaskGateway, SpectralService  ],
+  exports:[SpectralService]
 })
 export class TaskModule {}

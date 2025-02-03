@@ -35,19 +35,14 @@ export class NodeOdmService {
 
   // Загрузка изображений для задачи в NodeODM.
   async uploadImages(taskId: string, images: Express.Multer.File[]) {
-    if (!images || !Array.isArray(images)) {
-      throw new BadRequestException('No images provided or invalid format');
-    }
-
     const formData = new FormData();
 
     images.forEach((image) => {
-      if (!image.path || !image.originalname) {
-        throw new BadRequestException('Invalid image format');
-      }
-      // Создаем ReadStream из сохраненного файла
-      const fileStream = createReadStream(image.path);
-      formData.append('images', fileStream, image.originalname);
+      // Старый код ожидал file.path:
+      // const fileStream = createReadStream(image.path);
+      
+      // Теперь нужно использовать buffer напрямую:
+      formData.append('images', image.buffer, image.originalname);
     });
 
     try {
@@ -60,7 +55,6 @@ export class NodeOdmService {
               ...formData.getHeaders(),
               'Content-Type': 'multipart/form-data',
             },
-            // Добавляем maxContentLength для больших файлов
             maxContentLength: Infinity,
             maxBodyLength: Infinity,
           },
@@ -70,7 +64,7 @@ export class NodeOdmService {
       console.error('Upload error:', error);
       throw new BadRequestException('Error uploading images: ' + error.message);
     }
-  }
+}
 
   // Запуск обработки задачи в NodeODM.
   async processTask(taskId: string) {

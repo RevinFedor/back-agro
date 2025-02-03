@@ -1,13 +1,21 @@
 import {
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { Role } from '@prisma/client';
 import { UpdateProjectDto } from './dto/update-project.dto';
-import { AddProjectMemberDto, UpdateProjectMemberRoleDto } from './dto/project-member.dto';
+
+import {
+  AddProjectMemberDto,
+  UpdateProjectMemberRoleDto,
+} from './dto/project-member.dto';
+
+import { rm } from 'fs/promises';
+import * as path from 'path';
 
 // ProjectService — сервис для управления проектами: создание, обновление, удаление проектов и управление участниками.
 @Injectable()
@@ -106,7 +114,7 @@ export class ProjectService {
     }
 
     // Проверяем, является ли пользователь участником проекта
-    const member = project.members.find(m => m.user.id === userId);
+    const member = project.members.find((m) => m.user.id === userId);
     if (!member) {
       throw new ForbiddenException('No access to this project');
     }
@@ -138,11 +146,14 @@ export class ProjectService {
     });
   }
 
-  // Удаление проекта только владельцем.
+  // Удаление проекта, его задач и taskMembers\projectMembers
   async remove(id: string, userId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id },
-      include: { owner: true },
+      include: {
+        owner: true,
+        tasks: true,
+      },
     });
 
     if (!project) {
@@ -153,17 +164,53 @@ export class ProjectService {
       throw new ForbiddenException('Only project owner can delete the project');
     }
 
+    // Удаляем файлы для каждой задачи проекта
+    for (const task of project.tasks) {
+      if (task.tiffPath) {
+        const taskDir = path.join('uploads', 'tasks', task.id);
+        try {
+          await rm(taskDir, { recursive: true, force: true });
+        } catch (error) {
+          Logger.error(
+            `Не удалось удалить файлы задачи ${task.id}: ${error.message}`,
+          );
+        }
+      }
+    }
+
+    // Удаляем все записи из базы данных в правильном порядке
     await this.prisma.$transaction([
-      this.prisma.projectMember.deleteMany({ where: { projectId: id } }),
-      this.prisma.task.deleteMany({ where: { projectId: id } }),
-      this.prisma.project.delete({ where: { id } }),
+      // Сначала удаляем taskMembers для всех задач проекта
+      this.prisma.taskMember.deleteMany({
+        where: {
+          task: {
+            projectId: id,
+          },
+        },
+      }),
+      // Затем удаляем projectMembers
+      this.prisma.projectMember.deleteMany({
+        where: { projectId: id },
+      }),
+      // Потом удаляем задачи
+      this.prisma.task.deleteMany({
+        where: { projectId: id },
+      }),
+      // И наконец сам проект
+      this.prisma.project.delete({
+        where: { id },
+      }),
     ]);
 
     return { message: 'Project deleted successfully' };
   }
 
   // Вспомогательный метод для проверки прав доступа к проекту.
-  private async checkProjectAccess(userId: string, projectId: string, requiredRole: Role = Role.VIEWER) {
+  private async checkProjectAccess(
+    userId: string,
+    projectId: string,
+    requiredRole: Role = Role.VIEWER,
+  ) {
     const member = await this.prisma.projectMember.findUnique({
       where: {
         userId_projectId: {
@@ -181,7 +228,8 @@ export class ProjectService {
     if (member.role === Role.OWNER) return true;
 
     // EDITOR может редактировать, но не менять роли других
-    if (member.role === Role.EDITOR && requiredRole === Role.VIEWER) return true;
+    if (member.role === Role.EDITOR && requiredRole === Role.VIEWER)
+      return true;
 
     // Точное совпадение ролей
     if (member.role !== requiredRole) {
@@ -212,7 +260,11 @@ export class ProjectService {
   }
 
   // Добавление нового участника в проект только владельцем.
-  async addProjectMember(projectId: string, addMemberDto: AddProjectMemberDto, userId: string) {
+  async addProjectMember(
+    projectId: string,
+    addMemberDto: AddProjectMemberDto,
+    userId: string,
+  ) {
     // Только OWNER может добавлять участников
     await this.checkProjectAccess(userId, projectId, Role.OWNER);
 
@@ -284,7 +336,7 @@ export class ProjectService {
 
     // Нельзя менять роль владельца проекта
     if (member.role === Role.OWNER) {
-      throw new ForbiddenException('Cannot change owner\'s role');
+      throw new ForbiddenException("Cannot change owner's role");
     }
 
     return this.prisma.projectMember.update({
@@ -311,7 +363,11 @@ export class ProjectService {
   }
 
   // Удаление участника из проекта только владельцем.
-  async removeProjectMember(projectId: string, memberUserId: string, userId: string) {
+  async removeProjectMember(
+    projectId: string,
+    memberUserId: string,
+    userId: string,
+  ) {
     // Только OWNER может удалять участников
     await this.checkProjectAccess(userId, projectId, Role.OWNER);
 
